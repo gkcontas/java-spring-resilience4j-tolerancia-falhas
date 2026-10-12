@@ -1,0 +1,19 @@
+services:
+  # The unstable carrier service. Faults are programmed at runtime through the
+  # admin API on the same port, so the application can set up each scenario
+  # before measuring it.
+  #
+  # Published on 8090 and not on WireMock's own 8080: that one belongs to the
+  # application, and 8081 is left free for the management port.
+  carrier:
+    image: wiremock/wiremock:3.9.2
+    container_name: fault-tolerance-carrier
+    command: ["--port", "8080", "--local-response-templating", "--disable-banner"]
+    ports:
+      - "8090:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/__admin/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
