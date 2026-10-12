@@ -1,0 +1,107 @@
+server:
+  port: 8080
+  tomcat:
+    threads:
+      # Small on purpose. The noisy-neighbour measurement needs a thread pool
+      # that can actually be exhausted by a slow dependency.
+      max: 50
+    # The default, written down because the bulkhead experiment sizes its load
+    # against it: 50 threads plus 100 queued connections.
+    accept-count: 100
+
+spring:
+  application:
+    name: fault-tolerance
+
+management:
+  # Same port as the API on purpose: the actuator is part of what this project
+  # demonstrates, and a second port only adds a thing to forward.
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,circuitbreakers,circuitbreakerevents,retries,retryevents,bulkheads
+  endpoint:
+    health:
+      show-details: always
+  health:
+    circuitbreakers:
+      enabled: true
+
+carrier:
+  base-url: http://localhost:8090
+  # The only thing that frees the socket. A TimeLimiter bounds the wait of the
+  # caller; it does not close a connection.
+  connect-timeout: 500ms
+  read-timeout: 3s
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        register-health-indicator: true
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        # Below this many calls in the window the failure rate is not even
+        # computed - the breaker stays closed no matter what comes back.
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 2s
+        slow-call-rate-threshold: 100
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        # Only a technical failure of the carrier moves the breaker. Without
+        # this list every business 404 counts, and the circuit opens for every
+        # client because some SKUs do not exist.
+        record-exceptions:
+          - com.gkcontas.resilience.carrier.CarrierUnavailableException
+        ignore-exceptions:
+          - com.gkcontas.resilience.carrier.QuoteNotFoundException
+          - com.gkcontas.resilience.carrier.CarrierRejectedException
+    instances:
+      carrier:
+        base-config: default
+
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 100ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        # Without jitter every client that failed at the same instant comes
+        # back at the same instant.
+        enable-randomized-wait: true
+        randomized-wait-factor: 0.5
+        # A whitelist, not a blacklist. The default is "retry anything", which
+        # includes CallNotPermittedException - the retry then sleeps the whole
+        # backoff to be refused again by the open circuit.
+        retry-exceptions:
+          - com.gkcontas.resilience.carrier.CarrierUnavailableException
+    instances:
+      carrier:
+        base-config: default
+
+  bulkhead:
+    configs:
+      default:
+        max-concurrent-calls: 10
+        # Shed immediately. Queueing here just moves the saturation one level up
+        # and burns the caller's thread while it waits.
+        max-wait-duration: 0
+    instances:
+      carrier:
+        base-config: default
+
+  timelimiter:
+    configs:
+      default:
+        timeout-duration: 500ms
+        cancel-running-future: true
+    instances:
+      carrier:
+        base-config: default
+
+logging:
+  level:
+    com.gkcontas.resilience: INFO
