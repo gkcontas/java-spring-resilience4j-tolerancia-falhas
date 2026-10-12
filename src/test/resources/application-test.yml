@@ -1,0 +1,17 @@
+carrier:
+  # The container port is injected by @DynamicPropertySource.
+  connect-timeout: 500ms
+  read-timeout: 3s
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      carrier:
+        base-config: default
+        wait-duration-in-open-state: 1s
+
+logging:
+  level:
+    com.gkcontas.resilience: INFO
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
